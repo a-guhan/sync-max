@@ -1,0 +1,1 @@
+Sync-max is for measuring perf of xyne-sync with xyne-spaces. Have local clone of both the projects.
