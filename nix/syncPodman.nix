@@ -11,8 +11,8 @@ pkgs.writeShellApplication {
     nginx="$state/nginx.conf"
     containerfile="$state/Containerfile"
     mkdir -p "$state"
-    sed 's/RUN cargo build --release --locked --bin server/RUN CARGO_BUILD_JOBS=1 RUSTFLAGS=-Cdebuginfo=0 cargo build --release --locked --bin server/' "$root/../xyne-sync-ref/docker/server/Dockerfile" > "$containerfile"
-    podman build -t xyne-sync-ref:local -f "$containerfile" "$root/../xyne-sync-ref"
+    sed 's/RUN cargo build --release --locked --bin server/RUN CARGO_BUILD_JOBS=1 RUSTFLAGS=-Cdebuginfo=0 cargo build --release --locked --bin server/' "$root/../temp/streamgres/docker/server/Dockerfile" > "$containerfile"
+    podman build -t xyne-sync-ref:local -f "$containerfile" "$root/../temp/streamgres"
     {
       printf 'services:\n'
       for index in $(seq 0 $((pods - 1))); do
@@ -33,6 +33,10 @@ pkgs.writeShellApplication {
       XYNE_SYNC_MUTATE_URL: "http://host.containers.internal:3001/api/zero/push"
       XYNE_SYNC_FORWARD_COOKIES: "true"
       XYNE_SYNC_SLOT_CLEANUP_AGE_MS: "60000"
+      XYNE_SYNC_PYROSCOPE_URL: "http://host.containers.internal:4040"
+      XYNE_SYNC_PYROSCOPE_APPLICATION: "xyne-sync"
+      XYNE_SYNC_PYROSCOPE_HEAP: "true"
+    restart: on-failure
     ports:
       - "$port:4848"
 EOF
@@ -40,6 +44,7 @@ EOF
       cat <<EOF
   sync-proxy:
     image: nginx:alpine
+    restart: unless-stopped
     ports:
       - "4847:4847"
     volumes:

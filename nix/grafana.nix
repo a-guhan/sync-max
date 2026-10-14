@@ -16,6 +16,11 @@ let
         access: proxy
         url: http://127.0.0.1:9090
         isDefault: true
+      - name: Pyroscope
+        uid: pyroscope
+        type: grafana-pyroscope-datasource
+        access: proxy
+        url: http://127.0.0.1:4040
   '';
   provider = pkgs.writeText "provider.yml" ''
     apiVersion: 1
@@ -40,20 +45,22 @@ let
         {"type":"timeseries","title":"End-to-end p95","gridPos":{"h":8,"w":12,"x":0,"y":8},"fieldConfig":{"defaults":{"unit":"s"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(xyne_sync_end_to_end_seconds_bucket[5m])))","legendFormat":"p95"}]},
         {"type":"timeseries","title":"Open connections","gridPos":{"h":8,"w":12,"x":12,"y":8},"targets":[{"expr":"xyne_sync_connections_open","legendFormat":"connections"}]},
         {"type":"timeseries","title":"CPU usage","gridPos":{"h":8,"w":12,"x":0,"y":16},"fieldConfig":{"defaults":{"unit":"percent"}},"targets":[{"expr":"100 * rate(xyne_sync_engine_busy_seconds_total[5m])","legendFormat":"engine"},{"expr":"100 * sum by (thread) (rate(xyne_sync_thread_cpu_seconds_total[5m]))","legendFormat":"{{thread}}"}]},
-        {"type":"timeseries","title":"Hydration p95","gridPos":{"h":8,"w":12,"x":12,"y":16},"fieldConfig":{"defaults":{"unit":"s"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le, kind) (rate(xyne_sync_hydrate_seconds_bucket[5m])))","legendFormat":"{{kind}}"}]}
+        {"type":"timeseries","title":"Hydration p95","gridPos":{"h":8,"w":12,"x":12,"y":16},"fieldConfig":{"defaults":{"unit":"s"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le, kind) (rate(xyne_sync_hydrate_seconds_bucket[5m])))","legendFormat":"{{kind}}"}]},
+        {"type":"flamegraph","title":"CPU flamegraph","gridPos":{"h":12,"w":12,"x":0,"y":24},"datasource":{"type":"grafana-pyroscope-datasource","uid":"pyroscope"},"targets":[{"refId":"A","queryType":"profile","labelSelector":"{service_name=\"xyne-sync\"}","profileTypeId":"process_cpu:cpu:nanoseconds:cpu:nanoseconds","groupBy":[],"includeExemplars":false,"includeHeatmap":false,"heatmapType":"individual"}]},
+        {"type":"flamegraph","title":"Heap flamegraph","gridPos":{"h":12,"w":12,"x":12,"y":24},"datasource":{"type":"grafana-pyroscope-datasource","uid":"pyroscope"},"targets":[{"refId":"A","queryType":"profile","labelSelector":"{service_name=\"xyne-sync\"}","profileTypeId":"memory:inuse_space:bytes:space:bytes","groupBy":[],"includeExemplars":false,"includeHeatmap":false,"heatmapType":"individual"}]}
       ]
     }
   '';
 in
 pkgs.writeShellApplication {
   name = "metrics-start";
-  runtimeInputs = [ pkgs.coreutils pkgs.git pkgs.grafana pkgs.prometheus ];
+  runtimeInputs = [ pkgs.coreutils pkgs.git pkgs.grafana pkgs.prometheus pkgs.pyroscope ];
   text = ''
     root=$(git rev-parse --show-toplevel)
     pods="''${1:-1}"
     case "$pods" in *[!0-9]*|0) printf 'pods must be a positive integer\n' >&2; exit 2;; esac
     state="$root/.state/metrics"
-    mkdir -p "$state/dashboards" "$state/provisioning/dashboards" "$state/provisioning/datasources" "$state/grafana/plugins"
+    mkdir -p "$state/dashboards" "$state/provisioning/dashboards" "$state/provisioning/datasources" "$state/grafana/plugins" "$state/pyroscope"
     rm -f "$state/prometheus.yml" "$state/grafana.ini" "$state/provisioning/datasources/prometheus.yml" "$state/provisioning/dashboards/provider.yml" "$state/dashboards/xyne-sync.json"
     {
       printf 'global:\n  scrape_interval: 5s\nscrape_configs:\n  - job_name: xyne-sync\n    static_configs:\n      - targets: ['
@@ -71,7 +78,9 @@ pkgs.writeShellApplication {
     cp ${dashboard} "$state/dashboards/xyne-sync.json"
     prometheus --config.file="$state/prometheus.yml" --storage.tsdb.path="$state/prometheus" > "$state/prometheus.log" 2>&1 &
     prometheus_pid=$!
-    trap 'kill "$prometheus_pid" 2>/dev/null || true' EXIT INT TERM
+    pyroscope --target=all --server.http-listen-address=0.0.0.0 --server.http-listen-port=4040 --storage.backend=filesystem --storage.filesystem.dir="$state/pyroscope/shared" --metastore.data-dir="$state/pyroscope/metastore/data" --metastore.raft.dir="$state/pyroscope/metastore/raft" --metastore.raft.snapshots-dir="$state/pyroscope/metastore/snapshots" > "$state/pyroscope.log" 2>&1 &
+    pyroscope_pid=$!
+    trap 'kill "$prometheus_pid" "$pyroscope_pid" 2>/dev/null || true' EXIT INT TERM
     GF_PATHS_DATA="$state/grafana" GF_PATHS_LOGS="$state/grafana/log" GF_PATHS_PLUGINS="$state/grafana/plugins" GF_PATHS_PROVISIONING="$state/provisioning" grafana server --homepath=${pkgs.grafana}/share/grafana --config="$state/grafana.ini"
   '';
 }

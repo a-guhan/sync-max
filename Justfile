@@ -7,10 +7,13 @@ start-spaces:
 start-sync pods="1":
   nix develop --command sync-start {{pods}}
 
+sync-art base-branch feature-branch:
+  nix develop --command sync-art {{base-branch}} {{feature-branch}}
+
 kill:
   for pid in $(pgrep -f '/bin/start$$' || true); do if test "$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')" = "$PWD"; then kill "$pid" 2>/dev/null || true; fi; done
-  pkill -TERM -f 'xyne-sync-ref/.*/server' || true
-  pkill -TERM -f 'xyne-sync-ref/Cargo.toml' || true
+  pkill -TERM -f 'temp/streamgres/.*/server' || true
+  pkill -TERM -f 'temp/streamgres/Cargo.toml' || true
   podman-compose -f "$PWD/.state/sync-podman/compose.yml" down 2>/dev/null || true
   pkill -TERM -f 'xyne-spaces.*pnpm.*run up' || true
   pkill -TERM -f '/sync-max/.state/(sync|spaces)\.log' || true
